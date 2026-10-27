@@ -1,0 +1,14 @@
+# Secrets and local tooling
+.env
+*.env.local
+.claude/
+
+# Node
+node_modules/
+coverage/
+
+# OS / editors
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/

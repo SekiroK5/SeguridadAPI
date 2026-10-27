@@ -1,0 +1,241 @@
+openapi: 3.0.3
+info:
+  title: Task Manager API
+  version: 1.0.0
+  description: >
+    Secure, versioned REST API for the Flutter task manager. Every task route is
+    scoped to the identity in the verified access token; clients never send owner IDs.
+servers:
+  - url: http://localhost:3000/api/v1
+    description: Local development
+  - url: https://api.example.com/api/v1
+    description: Deployed (HTTPS only)
+tags:
+  - name: auth
+  - name: tasks
+paths:
+  /auth/register:
+    post:
+      tags: [auth]
+      summary: Create an account and receive the first token pair
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/RegisterRequest' }
+      responses:
+        "201": { description: Account created, content: { application/json: { schema: { $ref: '#/components/schemas/TokenPair' } } } }
+        "400": { $ref: '#/components/responses/ValidationError' }
+        "409": { $ref: '#/components/responses/Conflict' }
+        "429": { $ref: '#/components/responses/RateLimited' }
+  /auth/login:
+    post:
+      tags: [auth]
+      summary: Sign in with email and password
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/LoginRequest' }
+      responses:
+        "200": { description: Signed in, content: { application/json: { schema: { $ref: '#/components/schemas/TokenPair' } } } }
+        "400": { $ref: '#/components/responses/ValidationError' }
+        "401": { $ref: '#/components/responses/Unauthenticated' }
+        "429": { $ref: '#/components/responses/RateLimited' }
+  /auth/refresh:
+    post:
+      tags: [auth]
+      summary: Rotate a refresh token (reuse of a rotated token revokes its family)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/RefreshRequest' }
+      responses:
+        "200": { description: New token pair, content: { application/json: { schema: { $ref: '#/components/schemas/TokenPair' } } } }
+        "400": { $ref: '#/components/responses/ValidationError' }
+        "401": { $ref: '#/components/responses/Unauthenticated' }
+        "429": { $ref: '#/components/responses/RateLimited' }
+  /auth/logout:
+    post:
+      tags: [auth]
+      summary: Revoke the refresh-token family of this session
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/RefreshRequest' }
+      responses:
+        "204": { description: Logged out }
+        "400": { $ref: '#/components/responses/ValidationError' }
+  /auth/logout-all:
+    post:
+      tags: [auth]
+      summary: Revoke every active refresh token of the authenticated user
+      security:
+        - bearerAuth: []
+      responses:
+        "204": { description: All sessions revoked }
+        "401": { $ref: '#/components/responses/Unauthenticated' }
+  /tasks:
+    get:
+      tags: [tasks]
+      summary: List the current user's tasks
+      security:
+        - bearerAuth: []
+      parameters:
+        - in: query
+          name: page
+          schema: { type: integer, minimum: 1, default: 1 }
+        - in: query
+          name: limit
+          schema: { type: integer, minimum: 1, maximum: 100, default: 20 }
+      responses:
+        "200":
+          description: Current user's paginated tasks
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/TaskPage' }
+        "400": { $ref: '#/components/responses/ValidationError' }
+        "401": { $ref: '#/components/responses/Unauthenticated' }
+    post:
+      tags: [tasks]
+      summary: Create a task owned by the current user
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/CreateTask' }
+      responses:
+        "201": { description: Task created, content: { application/json: { schema: { $ref: '#/components/schemas/TaskItem' } } } }
+        "400": { $ref: '#/components/responses/ValidationError' }
+        "401": { $ref: '#/components/responses/Unauthenticated' }
+  /tasks/{taskId}:
+    parameters:
+      - in: path
+        name: taskId
+        required: true
+        schema: { type: string, pattern: '^c[a-z0-9]{20,30}$' }
+    patch:
+      tags: [tasks]
+      summary: Update one of the current user's tasks
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/UpdateTask' }
+      responses:
+        "200": { description: Task updated, content: { application/json: { schema: { $ref: '#/components/schemas/TaskItem' } } } }
+        "400": { $ref: '#/components/responses/ValidationError' }
+        "401": { $ref: '#/components/responses/Unauthenticated' }
+        "404": { $ref: '#/components/responses/NotFound' }
+    delete:
+      tags: [tasks]
+      summary: Delete one of the current user's tasks
+      security:
+        - bearerAuth: []
+      responses:
+        "204": { description: Task deleted }
+        "400": { $ref: '#/components/responses/ValidationError' }
+        "401": { $ref: '#/components/responses/Unauthenticated' }
+        "404": { $ref: '#/components/responses/NotFound' }
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+  schemas:
+    RegisterRequest:
+      type: object
+      required: [email, password]
+      properties:
+        email: { type: string, format: email }
+        password: { type: string, minLength: 12, maxLength: 128 }
+    LoginRequest:
+      type: object
+      required: [email, password]
+      properties:
+        email: { type: string, format: email }
+        password: { type: string, minLength: 1, maxLength: 128 }
+    RefreshRequest:
+      type: object
+      required: [refreshToken]
+      properties:
+        refreshToken: { type: string, minLength: 20, maxLength: 200 }
+    TokenPair:
+      type: object
+      properties:
+        accessToken: { type: string, description: 'HS256 JWT, 10 minutes' }
+        refreshToken: { type: string, description: 'Opaque, 7 days, rotated on every use' }
+        expiresIn: { type: integer, example: 600 }
+    Task:
+      type: object
+      properties:
+        id: { type: string }
+        ownerId: { type: string }
+        title: { type: string, maxLength: 120 }
+        description: { type: string, nullable: true, maxLength: 2000 }
+        completed: { type: boolean }
+        createdAt: { type: string, format: date-time }
+        updatedAt: { type: string, format: date-time }
+    TaskItem:
+      type: object
+      properties:
+        item: { $ref: '#/components/schemas/Task' }
+    TaskPage:
+      type: object
+      properties:
+        items:
+          type: array
+          items: { $ref: '#/components/schemas/Task' }
+        page: { type: integer }
+        limit: { type: integer }
+    CreateTask:
+      type: object
+      required: [title]
+      properties:
+        title: { type: string, minLength: 1, maxLength: 120 }
+        description: { type: string, maxLength: 2000 }
+    UpdateTask:
+      type: object
+      minProperties: 1
+      properties:
+        title: { type: string, minLength: 1, maxLength: 120 }
+        description: { type: string, nullable: true, maxLength: 2000 }
+        completed: { type: boolean }
+    Error:
+      type: object
+      properties:
+        error:
+          type: object
+          properties:
+            code: { type: string, example: VALIDATION_ERROR }
+            message: { type: string }
+            details:
+              type: array
+              items:
+                type: object
+                properties:
+                  field: { type: string }
+                  message: { type: string }
+  responses:
+    ValidationError:
+      description: Invalid request
+      content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } }
+    Unauthenticated:
+      description: Missing, invalid, or expired credentials
+      content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } }
+    NotFound:
+      description: Task does not exist or belongs to another user
+      content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } }
+    Conflict:
+      description: Email already registered
+      content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } }
+    RateLimited:
+      description: Too many requests in the 15-minute window
+      content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } }
